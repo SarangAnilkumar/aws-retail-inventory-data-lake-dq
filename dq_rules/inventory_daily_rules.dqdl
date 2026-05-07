@@ -1,0 +1,12 @@
+# Phase 1 skeleton
+# Validate this syntax against AWS Glue DQDL before deployment.
+
+Rules = [
+  IsComplete "product_id",
+  IsComplete "store_id",
+  IsComplete "event_date",
+  IsNonNegative "inventory_on_hand",
+  IsNonNegative "units_sold",
+  IsNonNegative "units_ordered",
+  ColumnValues "price" > 0
+]
