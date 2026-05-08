@@ -4,6 +4,7 @@ This folder contains concise proof that the MVP pipeline is implemented and quer
 
 ## Screenshot Index
 
+- `docs/architecture.png` (referenced as `00_architecture_diagram.png`) - Shows the end-to-end project architecture and implemented vs future components.
 - `01_s3_bucket_structure.png` - S3 zone layout is in place.
 - `02_s3_curated_partitions.png` - Partitioned curated fact storage is in place.
 - `03_athena_databases_tables.png` - Athena external tables are registered.

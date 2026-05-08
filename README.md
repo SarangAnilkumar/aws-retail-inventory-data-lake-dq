@@ -12,13 +12,22 @@ Implementation-ready MVP portfolio project for early-career Data Engineering and
 | Athena external tables | Complete |
 | Athena analytics views | Complete |
 | Athena DQ views | Complete |
-| QuickSight dashboard | Not implemented yet |
+| Quarantine handling | Complete |
+| Architecture diagram | Complete |
+| QuickSight dashboard | Future improvement |
 | AWS Glue job deployment | Future improvement |
-| Glue Data Quality/DQDL | Future improvement |
+| Glue Crawlers | Future improvement |
+| Glue Data Quality / DQDL | Future improvement |
 
 ## Project Summary
 
 This project delivers a portfolio-ready retail inventory data platform: local PySpark ETL writes curated and quarantine data, S3 stores lake zones, and Athena serves analytics and DQ monitoring views. The current implementation is practical and auditable; Glue job orchestration, Glue DQ execution, and QuickSight dashboarding are planned improvements.
+
+## Architecture Diagram
+
+![Architecture Diagram](docs/architecture.png)
+
+This architecture shows the implemented MVP flow: local PySpark ETL with data quality checks, curated/quarantine/DQ outputs stored in Amazon S3, and Athena external tables/views for analytics and data quality reporting. AWS Glue, Glue Data Quality, EventBridge, SNS, and QuickSight are shown as future enhancements, not current implementation.
 
 ## Business Problem
 
@@ -117,6 +126,13 @@ To be finalized in Phase 6.
 ## Interview Pitch
 
 To be finalized in Phase 6.
+
+## Portfolio Value
+
+- Demonstrates end-to-end data lake design from raw data to SQL analytics.
+- Shows practical data quality engineering through validation, quarantine handling, and DQ monitoring views.
+- Uses partitioned Parquet on S3 and Athena external tables/views for scalable analytics patterns.
+- Documents current implementation honestly while outlining realistic AWS Glue and BI enhancements.
 
 ## Limitations and Future Improvements
 
