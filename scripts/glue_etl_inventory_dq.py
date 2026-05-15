@@ -25,8 +25,82 @@ from pyspark.sql import functions as F
 from pyspark.sql.window import Window
 
 
+_GLUE_PARAM_ALIASES: tuple[tuple[str, str], ...] = (
+    ("input_base_path", "input-base-path"),
+    ("output_base_path", "output-base-path"),
+    ("quarantine_base_path", "quarantine-base-path"),
+    ("dq_results_path", "dq-results-path"),
+    ("ingest_run_id", "ingest-run-id"),
+    ("use_bad_records", "use-bad-records"),
+    ("inventory_file", "inventory-file"),
+    ("bad_inventory_file", "bad-inventory-file"),
+)
+
+
 def _running_on_glue() -> bool:
-    return "JOB_NAME" in sys.argv or os.environ.get("AWS_EXECUTION_ENV") == "AWS_Glue"
+    if "--JOB_NAME" in sys.argv or "JOB_NAME" in sys.argv:
+        return True
+    aws_env = os.environ.get("AWS_EXECUTION_ENV", "")
+    if "AWS_Glue" in aws_env:
+        return True
+    if os.environ.get("GLUE_VERSION"):
+        return True
+    return False
+
+
+def _argv_keys_summary() -> str:
+    """Safe summary of argv flag names only (no values)."""
+    keys: list[str] = []
+    for arg in sys.argv[1:]:
+        if not arg.startswith("--"):
+            continue
+        flag = arg[2:]
+        if "=" in flag:
+            flag = flag.split("=", 1)[0]
+        keys.append(flag)
+    return ", ".join(keys) if keys else "(none)"
+
+
+def _pick_glue_argv_key(underscore_name: str, hyphen_name: str) -> str:
+    if f"--{underscore_name}" in sys.argv:
+        return underscore_name
+    if f"--{hyphen_name}" in sys.argv:
+        return hyphen_name
+    for arg in sys.argv[1:]:
+        if arg.startswith(f"--{underscore_name}="):
+            return underscore_name
+        if arg.startswith(f"--{hyphen_name}="):
+            return hyphen_name
+    return underscore_name
+
+
+def _glue_flag_present(underscore_name: str, hyphen_name: str) -> bool:
+    return (
+        f"--{underscore_name}" in sys.argv
+        or f"--{hyphen_name}" in sys.argv
+        or any(
+            arg.startswith(f"--{underscore_name}=") or arg.startswith(f"--{hyphen_name}=")
+            for arg in sys.argv[1:]
+        )
+    )
+
+
+def _glue_getresolved_keys() -> list[str]:
+    keys = ["JOB_NAME"]
+    required_params = _GLUE_PARAM_ALIASES[:6]
+    optional_params = _GLUE_PARAM_ALIASES[6:]
+
+    for unders, hyphen in required_params:
+        keys.append(_pick_glue_argv_key(unders, hyphen))
+
+    for unders, hyphen in optional_params:
+        if _glue_flag_present(unders, hyphen):
+            keys.append(_pick_glue_argv_key(unders, hyphen))
+    return keys
+
+
+def _opt_from_resolved(opts: dict[str, str], unders: str, hyphen: str, default: str) -> str:
+    return opts.get(unders) or opts.get(hyphen) or default
 
 
 def _is_s3_path(path: str | Path) -> bool:
@@ -45,29 +119,24 @@ def parse_args() -> argparse.Namespace:
     if _running_on_glue():
         from awsglue.utils import getResolvedOptions
 
-        glue_keys = [
-            "JOB_NAME",
-            "input-base-path",
-            "output-base-path",
-            "quarantine-base-path",
-            "dq-results-path",
-            "ingest-run-id",
-            "use-bad-records",
-        ]
-        for optional_key in ("inventory-file", "bad-inventory-file"):
-            if f"--{optional_key}" in sys.argv:
-                glue_keys.append(optional_key)
-        opts = getResolvedOptions(sys.argv, glue_keys)
+        opts = getResolvedOptions(sys.argv, _glue_getresolved_keys())
         return argparse.Namespace(
-            input_base_path=opts["input-base-path"],
-            output_base_path=opts["output-base-path"],
-            quarantine_base_path=opts["quarantine-base-path"],
-            dq_results_path=opts["dq-results-path"],
-            ingest_run_id=opts["ingest-run-id"],
-            use_bad_records=opts["use-bad-records"],
-            inventory_file=opts.get("inventory-file", "inventory_daily_clean.csv"),
-            bad_inventory_file=opts.get(
-                "bad-inventory-file", "inventory_daily_with_bad_records.csv"
+            input_base_path=_opt_from_resolved(opts, "input_base_path", "input-base-path", ""),
+            output_base_path=_opt_from_resolved(opts, "output_base_path", "output-base-path", ""),
+            quarantine_base_path=_opt_from_resolved(
+                opts, "quarantine_base_path", "quarantine-base-path", ""
+            ),
+            dq_results_path=_opt_from_resolved(opts, "dq_results_path", "dq-results-path", ""),
+            ingest_run_id=_opt_from_resolved(opts, "ingest_run_id", "ingest-run-id", ""),
+            use_bad_records=_opt_from_resolved(opts, "use_bad_records", "use-bad-records", "false"),
+            inventory_file=_opt_from_resolved(
+                opts, "inventory_file", "inventory-file", "inventory_daily_clean.csv"
+            ),
+            bad_inventory_file=_opt_from_resolved(
+                opts,
+                "bad_inventory_file",
+                "bad-inventory-file",
+                "inventory_daily_with_bad_records.csv",
             ),
         )
 
@@ -80,7 +149,10 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--use-bad-records", default="false")
     parser.add_argument("--inventory-file", default="inventory_daily_clean.csv")
     parser.add_argument("--bad-inventory-file", default="inventory_daily_with_bad_records.csv")
-    return parser.parse_args()
+    args, unknown = parser.parse_known_args()
+    if unknown:
+        logging.warning("Ignoring unknown arguments: %s", unknown)
+    return args
 
 
 def create_spark_session() -> SparkSession:
@@ -487,6 +559,9 @@ def write_dq_results(
 
 def main() -> None:
     logging.basicConfig(level=logging.INFO, format="%(asctime)s | %(levelname)s | %(message)s")
+    glue_mode = _running_on_glue()
+    logging.info("Running in Glue mode: %s", glue_mode)
+    logging.info("sys.argv keys detected: %s", _argv_keys_summary())
     args = parse_args()
     spark = create_spark_session()
 
