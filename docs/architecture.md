@@ -4,7 +4,7 @@
 
 ## Overview
 
-This project implements a retail inventory data lake with automated data quality monitoring. The current MVP runs a local PySpark ETL pipeline that validates and partitions inventory data, lands curated, quarantine, and DQ outputs in Amazon S3, and exposes analytics and DQ monitoring through Athena external tables and views. Working state is captured as screenshots in `docs/screenshots/`. AWS Glue (job, crawlers, Data Quality), EventBridge, SNS, and QuickSight are positioned as future enhancements.
+This project implements a retail inventory data lake with automated data quality monitoring. The current MVP runs a **local PySpark ETL** pipeline that validates and partitions inventory data, lands curated, quarantine, and DQ outputs in **Amazon S3**, exposes analytics and DQ monitoring through **Athena** external tables and views, and delivers business consumption through a published **Amazon QuickSight** dashboard. Working state is captured in `docs/screenshots/`. AWS Glue (job, crawlers, Data Quality), EventBridge, and SNS remain future enhancements.
 
 The end-to-end diagram is at `docs/architecture.png`.
 
@@ -18,7 +18,8 @@ The end-to-end diagram is at `docs/architecture.png`.
 6. Athena external tables are registered over S3 data using `sql/create_external_tables.sql`.
 7. Curated partitions are made queryable using `MSCK REPAIR TABLE` (manual step today, not a Glue Crawler).
 8. Athena business and DQ views are created from `sql/analytics_views.sql` and `sql/dq_views.sql`.
-9. Implementation is captured as screenshots `01`–`11` in `docs/screenshots/`.
+9. Amazon QuickSight dashboards consume Athena-backed datasets (Retail Inventory Intelligence and Data Quality Control Centre sheets).
+10. Implementation is captured as screenshots `01`–`13` in `docs/screenshots/` (see `docs/quicksight_dashboard.md`).
 
 ## Architecture components
 
@@ -26,8 +27,9 @@ The end-to-end diagram is at `docs/architecture.png`.
 - **PySpark ETL + DQ**: Local PySpark job that types, validates, partitions, and quarantines records.
 - **Amazon S3 data lake**: Zoned bucket layout for raw, curated, quarantine, DQ results, and Athena query staging.
 - **Athena SQL analytics layer**: External tables and curated business + DQ views.
-- **Portfolio outputs**: README, this architecture document, the architecture diagram (`docs/architecture.png`), and Athena/S3 screenshots in `docs/screenshots/`.
-- **Future enhancements**: AWS Glue job, Glue Crawlers, AWS Glue Data Quality (DQDL), Amazon EventBridge, Amazon SNS, and Amazon QuickSight.
+- **Amazon QuickSight**: Published dashboards on Athena-backed datasets (inventory intelligence + DQ control centre).
+- **Portfolio outputs**: README, architecture docs, diagram, Athena/S3/QuickSight screenshots in `docs/screenshots/`.
+- **Future enhancements**: AWS Glue job, Glue Crawlers, AWS Glue Data Quality (DQDL), Amazon EventBridge, Amazon SNS.
 
 ## Data quality flow
 
@@ -37,7 +39,8 @@ The end-to-end diagram is at `docs/architecture.png`.
 4. Records that fail any rule go to `quarantine/` with a `failure_reason` and run timestamp.
 5. Per-rule and per-table summaries are persisted under `dq-results/` and exposed through Athena DQ views in `sql/dq_views.sql`.
 6. DQ status, quarantine summary, and row-level quality views are queryable in Athena (see screenshots `09`–`11`).
-7. Reference DQDL rule sets in `dq_rules/` describe the same intent for a future AWS Glue Data Quality run.
+7. QuickSight visualizes the same metrics for business and DQ stakeholders (see screenshots `12`–`13`).
+8. Reference DQDL rule sets in `dq_rules/` describe the same intent for a future AWS Glue Data Quality run.
 
 ## S3 data lake zones
 
@@ -52,22 +55,28 @@ The end-to-end diagram is at `docs/architecture.png`.
 ## Athena SQL layer
 
 - **External tables** (`sql/create_external_tables.sql`): register curated, quarantine, and DQ result data over S3.
-- **Business views** (`sql/analytics_views.sql`):
-  - `inventory_health_view`
-  - `stockout_rate_view`
-  - `supplier_delay_view`
-- **DQ monitoring views** (`sql/dq_views.sql`):
-  - `dq_latest_status_view`
-  - `dq_quarantine_summary_view`
-  - `dq_row_level_quality_summary`
+- **Business views** (`sql/analytics_views.sql`): e.g. `vw_inventory_health`, `vw_stockout_rate_by_store`, `vw_stockout_rate_by_category`, `vw_products_below_reorder_threshold`, `vw_supplier_delay_rate`
+- **DQ monitoring views** (`sql/dq_views.sql`): e.g. `vw_latest_dq_status`, `vw_quarantine_summary`, `vw_failed_rules_by_severity`, `vw_row_level_quality_summary`
 
 ## Portfolio outputs
 
 - `README.md` — project overview, status, portfolio positioning.
 - `docs/architecture.md` — this document.
 - `docs/architecture.png` — end-to-end architecture diagram.
-- `docs/screenshots/01`–`11` — Athena and S3 proofs of implementation.
+- `docs/screenshots/01`–`13` — S3, Athena, and QuickSight proofs of implementation.
+- `docs/quicksight_dashboard.md` — QuickSight sheet and metric documentation.
 - `sql/` and `dq_rules/` — reference SQL views and DQDL rules.
+
+## Amazon QuickSight layer
+
+Published dashboards use Athena-backed datasets over `retail_curated_db` and `retail_dq_db`.
+
+| Sheet | Key visuals |
+| --- | --- |
+| Retail Inventory Intelligence | Total stockout records, average supplier delay, products requiring replenishment, average stockout rate, stockout rate by store/category, supplier delay rate, replenishment priority table |
+| Data Quality Control Centre | Row pass rate, curated rows, quarantined rows, total input rows, failed rows by DQ severity, rule-level DQ status, quarantined records by failure type, DQ rules checked |
+
+Screenshots: `12_quicksight_inventory_dashboard.png`, `13_quicksight_dq_dashboard.png`.
 
 ## Future enhancements
 
@@ -76,7 +85,6 @@ The end-to-end diagram is at `docs/architecture.png`.
 - Run **AWS Glue Data Quality (DQDL)** rule sets in `dq_rules/` natively on AWS.
 - Use **Amazon EventBridge** for scheduled / event-driven pipeline triggers.
 - Use **Amazon SNS** for DQ alerting on rule failures or quarantine spikes.
-- Build an **Amazon QuickSight** dashboard on the Athena views for an Inventory Intelligence + DQ Control Centre experience.
 
 ## What is not implemented yet
 
@@ -85,7 +93,6 @@ The end-to-end diagram is at `docs/architecture.png`.
 - AWS Glue Data Quality (DQDL) execution (`dq_rules/*.dqdl` are reference rules only; checks today run in PySpark and Athena SQL).
 - Amazon EventBridge scheduling.
 - Amazon SNS alerting.
-- Amazon QuickSight dashboards.
 
 ## Diagram explanation
 
@@ -95,5 +102,6 @@ The end-to-end diagram is at `docs/architecture.png`.
 | PySpark ETL + DQ | Validates, types, splits records into pass / fail, writes curated, quarantine, and DQ outputs | Implemented (runs locally) |
 | Amazon S3 Data Lake | Stores raw, curated, quarantine, DQ results, and Athena query staging | Implemented |
 | Athena SQL Analytics Layer | External tables plus business and DQ views over S3 | Implemented |
+| Amazon QuickSight | Athena-backed dashboards for inventory and DQ monitoring | Implemented |
 | Portfolio Outputs | README, architecture doc, diagram, screenshots, reference SQL and DQDL | Implemented |
-| Future Enhancements | AWS Glue job, Glue Crawlers, Glue Data Quality, EventBridge, SNS, QuickSight | Not implemented (planned) |
+| Future Enhancements | AWS Glue job, Glue Crawlers, Glue Data Quality, EventBridge, SNS | Not implemented (planned) |

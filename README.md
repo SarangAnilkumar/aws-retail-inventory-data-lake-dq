@@ -54,15 +54,33 @@ Detailed architecture notes: `docs/architecture.md`
 
 ## Amazon QuickSight Dashboard
 
-The published Amazon QuickSight dashboard is built from **Athena-backed datasets** over the curated and DQ databases (`retail_curated_db`, `retail_dq_db`). Datasets use views and tables already proven in Athena (see `sql/analytics_views.sql` and `sql/dq_views.sql`).
+The published Amazon QuickSight dashboard completes the **AWS-native consumption layer** for this project. It is built from **Athena-backed datasets** over `retail_curated_db` and `retail_dq_db`, using tables and views already validated in Athena (`sql/analytics_views.sql`, `sql/dq_views.sql`). ETL still runs locally with PySpark; S3, Athena, and QuickSight are the implemented AWS surfaces.
 
 The dashboard contains two sheets:
 
-1. **Retail Inventory Intelligence** — stockout risk, supplier delay, replenishment priorities, and related inventory KPIs sourced from curated analytics views.
-2. **Data Quality Control Centre** — row pass rate, quarantined records, failed DQ severity, and rule-level DQ monitoring sourced from DQ views and quarantine summaries.
+### 1. Retail Inventory Intelligence
+
+- Total stockout records
+- Average supplier delay
+- Products requiring replenishment
+- Average stockout rate
+- Stockout rate by store and category
+- Supplier delay rate
+- Replenishment priority table
+
+### 2. Data Quality Control Centre
+
+- Row pass rate
+- Curated rows
+- Quarantined rows
+- Total input rows
+- Failed rows by DQ severity
+- Rule-level DQ status
+- Quarantined records by failure type
+- DQ rules checked
 
 Proof screenshots: `docs/screenshots/12_quicksight_inventory_dashboard.png`, `docs/screenshots/13_quicksight_dq_dashboard.png`.  
-Dashboard notes: `docs/quicksight_dashboard.md`.
+Full dashboard notes: `docs/quicksight_dashboard.md`.
 
 ## Dataset Strategy
 
@@ -123,11 +141,8 @@ The screenshots in `docs/screenshots/` show concrete proof that the MVP is imple
 - `13_quicksight_dq_dashboard.png` - QuickSight Data Quality Control Centre sheet is published.
 
 Implementation status reflected by these screenshots:
-- ETL is currently run as a local PySpark pipeline.
-- Data lake storage and query surfaces are on AWS (S3 + Athena).
-- DQ quarantine handling is implemented and queryable.
-- Amazon QuickSight dashboards are published on Athena-backed datasets.
-- The ETL script is Glue-compatible by design, but AWS Glue job deployment, Glue Crawler setup, and Glue DQ (DQDL) execution are not implemented yet.
+- **Implemented:** local PySpark ETL, Amazon S3 data lake, Athena external tables/views, quarantine handling, Amazon QuickSight dashboards (Athena-backed).
+- **Future improvements:** AWS Glue job deployment, Glue Crawlers, AWS Glue Data Quality / DQDL, EventBridge scheduling, SNS alerts.
 
 ## Cost Control Notes
 
