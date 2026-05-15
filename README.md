@@ -48,7 +48,9 @@ Amazon QuickSight dashboard
 
 ## Architecture Diagram
 
-![Architecture Diagram](docs/architecture.png)
+![Architecture Diagram](docs/screenshots/architecture_diagram.png)
+
+Interactive version: [`docs/architecture_diagram.html`](docs/architecture_diagram.html) (export toolbar: Copy / PNG / PDF).
 
 This architecture shows the implemented MVP flow: local PySpark for development, AWS Glue Spark ETL for cloud execution, curated/quarantine/DQ outputs in Amazon S3, Athena external tables/views for analytics and data quality reporting, and Amazon QuickSight dashboards for business consumption. Glue Crawlers, Glue Data Quality (DQDL), EventBridge, and SNS remain future enhancements.
 

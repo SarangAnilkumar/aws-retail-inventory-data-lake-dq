@@ -39,3 +39,11 @@ athena-results/
 
 # Notebook checkpoints
 .ipynb_checkpoints/
+
+# Local vendored diagram generator (reference only — do not commit)
+tools/architecture-diagram-generator/
+
+# Tooling / export caches
+node_modules/
+.playwright/
+*.pyc

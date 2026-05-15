@@ -1,6 +1,8 @@
 # Architecture
 
-![Architecture Diagram](architecture.png)
+![Architecture Diagram](screenshots/architecture_diagram.png)
+
+Interactive diagram: [`architecture_diagram.html`](architecture_diagram.html)
 
 ## Overview
 
@@ -11,7 +13,7 @@ This project implements a retail inventory data lake with automated data quality
 
 Downstream layers are **Amazon S3**, **Athena** (external tables and views), and **Amazon QuickSight**. Glue Crawlers, native Glue Data Quality (DQDL), EventBridge, and SNS remain future enhancements.
 
-The end-to-end diagram is at `docs/architecture.png`. Glue operations are documented in `docs/glue_job_runbook.md`.
+The end-to-end diagram is at `docs/screenshots/architecture_diagram.png` (source: `docs/architecture_diagram.html`). Re-export with `python3 scripts/export_architecture_diagram.py`. Glue operations are documented in `docs/glue_job_runbook.md`.
 
 ## Implemented MVP flow
 

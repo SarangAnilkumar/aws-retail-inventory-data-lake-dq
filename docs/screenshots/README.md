@@ -4,7 +4,11 @@ This folder contains concise proof that the MVP pipeline is implemented and quer
 
 ## Screenshot Index
 
-- `docs/architecture.png` (referenced as `00_architecture_diagram.png`) - Shows the end-to-end project architecture and implemented vs future components.
+- `docs/screenshots/architecture_diagram.png` — Compact README architecture diagram (`#architecture-export` only: header, pipeline, metrics, future, legend — no bottom cards).
+- `docs/screenshots/architecture_diagram_full.png` — Full HTML page export (`#report-container`: diagram plus explanatory cards and footer).
+- `docs/architecture_diagram.html` — Interactive Cocoon-style diagram with browser export toolbar (PNG/PDF).
+- Re-export both PNGs: `python3 scripts/export_architecture_diagram.py`
+- `docs/architecture.png` — Legacy static diagram (superseded by `architecture_diagram.png` for README).
 - `01_s3_bucket_structure.png` - S3 zone layout is in place.
 - `02_s3_curated_partitions.png` - Partitioned curated fact storage is in place.
 - `03_athena_databases_tables.png` - Athena external tables are registered.
