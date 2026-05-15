@@ -16,14 +16,16 @@ This folder contains concise proof that the MVP pipeline is implemented and quer
 - `09_dq_latest_status_view.png` - DQ status view is working.
 - `10_dq_quarantine_summary_view.png` - Quarantine summary view is working.
 - `11_dq_row_level_quality_summary.png` - Row-level DQ summary is working.
+- `12_quicksight_inventory_dashboard.png` - QuickSight Retail Inventory Intelligence sheet (Athena-backed).
+- `13_quicksight_dq_dashboard.png` - QuickSight Data Quality Control Centre sheet (Athena-backed).
 
 ## Notes
 
 - Pipeline execution for MVP is currently local PySpark.
-- AWS implementation proof shown here is S3 storage plus Athena tables/views.
+- AWS implementation proof shown here is S3 storage, Athena tables/views, and published QuickSight dashboards.
 - Quarantine handling and DQ reporting are implemented and queryable.
 - Glue-compatible ETL script exists, but AWS Glue job deployment is still a future improvement.
-- Glue Crawler, Glue Data Quality (DQDL execution), and QuickSight dashboard are future improvements.
+- Glue Crawler, Glue Data Quality (DQDL execution), EventBridge scheduling, and SNS alerts are future improvements.
 
 ## Privacy Requirement
 
