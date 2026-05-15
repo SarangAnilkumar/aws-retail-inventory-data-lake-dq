@@ -18,12 +18,18 @@ This folder contains concise proof that the MVP pipeline is implemented and quer
 - `11_dq_row_level_quality_summary.png` - Row-level DQ summary is working.
 - `12_quicksight_inventory_dashboard.png` - QuickSight Retail Inventory Intelligence sheet: stockout KPIs, supplier delay, replenishment priorities (Athena-backed).
 - `13_quicksight_dq_dashboard.png` - QuickSight Data Quality Control Centre sheet: row pass rate, quarantine summary, DQ severity, rule-level status (Athena-backed).
+- `14_glue_job_succeeded.png` - AWS Glue Spark ETL job run status shows **Succeeded** in the Glue console.
+- `15_glue_job_arguments.png` - Glue job parameters (underscore keys) and S3 paths for input/output zones.
+- `16_glue_cloudwatch_logs.png` - CloudWatch logs confirm Glue mode, ETL completion, and row counts.
+- `17_s3_glue_curated_outputs.png` - Partitioned curated Parquet under `curated-glue/` after Glue execution.
+- `18_s3_glue_quarantine_outputs.png` - Quarantine Parquet outputs under `quarantine-glue/`.
+- `19_s3_glue_dq_results.png` - DQ `rule_results` and `table_scores` under `dq-results-glue/`.
 
 ## Notes
 
-- **Implemented:** local PySpark ETL; Amazon S3 data lake; Athena external tables/views; quarantine and DQ reporting; published QuickSight dashboards (`12`, `13`).
-- **Future improvements:** AWS Glue job deployment, Glue Crawlers, AWS Glue Data Quality / DQDL, EventBridge scheduling, SNS alerts.
-- Glue-compatible ETL script exists for a future Glue deployment path.
+- **Implemented:** local PySpark ETL (dev/test); AWS Glue Spark ETL (cloud); Amazon S3 data lake; Athena external tables/views; quarantine and DQ reporting; QuickSight dashboards (`12`, `13`); Glue deployment proof (`14`–`19`).
+- **Future improvements:** Glue Crawlers, AWS Glue Data Quality / DQDL, EventBridge scheduling, SNS alerts.
+- Same ETL script (`scripts/glue_etl_inventory_dq.py`) runs locally and on Glue; see `docs/glue_job_runbook.md`.
 
 ## Privacy Requirement
 

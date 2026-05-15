@@ -15,21 +15,42 @@ Implementation-ready MVP portfolio project for early-career Data Engineering and
 | Quarantine handling | Complete |
 | Architecture diagram | Complete |
 | QuickSight dashboard | Complete |
-| AWS Glue job deployment | Future improvement |
+| AWS Glue Spark ETL job | Complete |
+| Glue job execution | Complete |
+| CloudWatch Glue logs | Complete |
+| S3 Glue output zones | Complete |
 | Glue Crawlers | Future improvement |
-| Glue Data Quality / DQDL | Future improvement |
+| AWS Glue Data Quality / DQDL | Future improvement |
 | EventBridge scheduling | Future improvement |
 | SNS alerts | Future improvement |
 
 ## Project Summary
 
-This project delivers a portfolio-ready retail inventory data platform: local PySpark ETL writes curated and quarantine data, S3 stores lake zones, Athena serves analytics and DQ monitoring views, and Amazon QuickSight provides executive-facing dashboards. The current implementation is practical and auditable; Glue job orchestration and native Glue DQ execution remain planned improvements.
+This project delivers a portfolio-ready retail inventory data platform with a clear execution split:
+
+**Local development/testing → AWS Glue Spark ETL → Amazon S3 Data Lake → Athena external tables/views → QuickSight dashboard**
+
+Local PySpark is used for fast iteration and validation. The same ETL script (`scripts/glue_etl_inventory_dq.py`) runs in AWS Glue for cloud execution, writing to dedicated `-glue` S3 prefixes. Athena and QuickSight consume the lake layers for SQL analytics and BI. Glue Crawlers, native Glue Data Quality (DQDL), EventBridge, and SNS remain planned improvements.
+
+## Project flow
+
+```text
+Local development/testing
+        ↓
+AWS Glue Spark ETL (cloud execution)
+        ↓
+Amazon S3 Data Lake (raw, curated-glue, quarantine-glue, dq-results-glue)
+        ↓
+Athena external tables / views
+        ↓
+Amazon QuickSight dashboard
+```
 
 ## Architecture Diagram
 
 ![Architecture Diagram](docs/architecture.png)
 
-This architecture shows the implemented MVP flow: local PySpark ETL with data quality checks, curated/quarantine/DQ outputs stored in Amazon S3, Athena external tables/views for analytics and data quality reporting, and Amazon QuickSight dashboards for business consumption. AWS Glue, Glue Data Quality, EventBridge, and SNS are shown as future enhancements, not current implementation.
+This architecture shows the implemented MVP flow: local PySpark for development, AWS Glue Spark ETL for cloud execution, curated/quarantine/DQ outputs in Amazon S3, Athena external tables/views for analytics and data quality reporting, and Amazon QuickSight dashboards for business consumption. Glue Crawlers, Glue Data Quality (DQDL), EventBridge, and SNS remain future enhancements.
 
 ## Business Problem
 
@@ -41,20 +62,43 @@ Design a reliable, rerunnable raw-to-curated pipeline with explicit data quality
 
 ## Architecture (High Level)
 
-- Raw CSVs land in `s3://retail-inventory-dq-lake/raw/`
-- Local PySpark ETL transforms + validates records
-- PySpark handles cross-column and cross-table checks
-- Passed records go to curated Parquet (partitioned)
-- Failed records go to quarantine with failure reason
-- DQ run summaries are written to DQ monitoring tables
-- Athena external tables and views power reporting
-- Amazon QuickSight dashboards consume Athena-backed datasets for inventory and DQ insights
+- Raw/generated CSVs land in `s3://retail-inventory-dq-lake-sarang-2026/raw/generated/`
+- **Local PySpark** (`scripts/glue_etl_inventory_dq.py`) — development and test runs against local folders
+- **AWS Glue Spark ETL** — same script, cloud execution via IAM role `AWSGlueServiceRoleRetailInventoryDQ`
+- Passed records → partitioned Parquet under `curated-glue/`; failed records → `quarantine-glue/`; DQ summaries → `dq-results-glue/`
+- Athena external tables and views power SQL analytics (local `curated/` path used for MVP Athena proof; Glue outputs in `-glue` prefixes)
+- Amazon QuickSight dashboards consume Athena-backed datasets
 
-Detailed architecture notes: `docs/architecture.md`
+Detailed architecture notes: `docs/architecture.md`  
+Glue operations: `docs/glue_job_runbook.md`
+
+## AWS Glue ETL Deployment
+
+The local PySpark ETL in `scripts/glue_etl_inventory_dq.py` was made **AWS Glue-compatible** (S3 paths, `getResolvedOptions` job parameters, Glue runtime detection). The deployed Glue Spark job:
+
+- Reads generated CSV inputs from `s3://retail-inventory-dq-lake-sarang-2026/raw/generated/`
+- Writes curated Parquet to `s3://retail-inventory-dq-lake-sarang-2026/curated-glue/`
+- Writes failed records to `s3://retail-inventory-dq-lake-sarang-2026/quarantine-glue/`
+- Writes DQ monitoring outputs to `s3://retail-inventory-dq-lake-sarang-2026/dq-results-glue/`
+- Uses IAM role **`AWSGlueServiceRoleRetailInventoryDQ`**
+- Completes successfully with confirmation in **CloudWatch** logs
+
+### Glue deployment proof
+
+| Screenshot | What it proves |
+| --- | --- |
+| [`14_glue_job_succeeded.png`](docs/screenshots/14_glue_job_succeeded.png) | Glue job run finished successfully |
+| [`15_glue_job_arguments.png`](docs/screenshots/15_glue_job_arguments.png) | Job parameters (underscore-style) passed to the script |
+| [`16_glue_cloudwatch_logs.png`](docs/screenshots/16_glue_cloudwatch_logs.png) | CloudWatch logs show successful ETL completion |
+| [`17_s3_glue_curated_outputs.png`](docs/screenshots/17_s3_glue_curated_outputs.png) | Curated Parquet landed under `curated-glue/` |
+| [`18_s3_glue_quarantine_outputs.png`](docs/screenshots/18_s3_glue_quarantine_outputs.png) | Quarantine outputs under `quarantine-glue/` |
+| [`19_s3_glue_dq_results.png`](docs/screenshots/19_s3_glue_dq_results.png) | DQ rule/table score outputs under `dq-results-glue/` |
+
+Full runbook: [`docs/glue_job_runbook.md`](docs/glue_job_runbook.md)
 
 ## Amazon QuickSight Dashboard
 
-The published Amazon QuickSight dashboard completes the **AWS-native consumption layer** for this project. It is built from **Athena-backed datasets** over `retail_curated_db` and `retail_dq_db`, using tables and views already validated in Athena (`sql/analytics_views.sql`, `sql/dq_views.sql`). ETL still runs locally with PySpark; S3, Athena, and QuickSight are the implemented AWS surfaces.
+The published Amazon QuickSight dashboard completes the **AWS-native consumption layer** for this project. It is built from **Athena-backed datasets** over `retail_curated_db` and `retail_dq_db`, using tables and views already validated in Athena (`sql/analytics_views.sql`, `sql/dq_views.sql`). ETL runs locally for development and on **AWS Glue** for cloud execution; S3, Athena, and QuickSight are the implemented AWS surfaces.
 
 The dashboard contains two sheets:
 
@@ -109,13 +153,13 @@ See `docs/dq_rules.md` for the full rule split and Glue DQ roadmap.
 
 Detailed commands will be added in later phases.
 
-## AWS Run (Planned)
+## AWS Run
 
-1. Upload raw files to S3.
-2. Run raw crawler.
-3. Run Glue ETL job with parameters.
-4. Register partitions (`MSCK REPAIR TABLE` or crawler).
-5. Execute Athena view SQL.
+1. Upload raw/generated CSVs to S3 (`raw/generated/`).
+2. Run the **AWS Glue Spark ETL job** with parameters in `docs/glue_job_runbook.md`.
+3. Validate `curated-glue/`, `quarantine-glue/`, and `dq-results-glue/` in S3 and CloudWatch.
+4. Register partitions in Athena (`MSCK REPAIR TABLE` or future Glue Crawler).
+5. Execute Athena view SQL and refresh QuickSight datasets as needed.
 
 ## Athena Views
 
@@ -139,10 +183,16 @@ The screenshots in `docs/screenshots/` show concrete proof that the MVP is imple
 - `11_dq_row_level_quality_summary.png` - Row-level DQ pass-rate metrics are queryable.
 - `12_quicksight_inventory_dashboard.png` - QuickSight Retail Inventory Intelligence sheet is published.
 - `13_quicksight_dq_dashboard.png` - QuickSight Data Quality Control Centre sheet is published.
+- `14_glue_job_succeeded.png` - AWS Glue Spark ETL job completed successfully.
+- `15_glue_job_arguments.png` - Glue job parameters configured (underscore-style keys).
+- `16_glue_cloudwatch_logs.png` - CloudWatch logs confirm successful Glue execution.
+- `17_s3_glue_curated_outputs.png` - Curated Parquet outputs under `curated-glue/`.
+- `18_s3_glue_quarantine_outputs.png` - Quarantine outputs under `quarantine-glue/`.
+- `19_s3_glue_dq_results.png` - DQ monitoring outputs under `dq-results-glue/`.
 
 Implementation status reflected by these screenshots:
-- **Implemented:** local PySpark ETL, Amazon S3 data lake, Athena external tables/views, quarantine handling, Amazon QuickSight dashboards (Athena-backed).
-- **Future improvements:** AWS Glue job deployment, Glue Crawlers, AWS Glue Data Quality / DQDL, EventBridge scheduling, SNS alerts.
+- **Implemented:** local PySpark ETL (dev/test), AWS Glue Spark ETL (cloud), Amazon S3 data lake, Athena external tables/views, quarantine handling, Amazon QuickSight dashboards (Athena-backed).
+- **Future improvements:** Glue Crawlers, AWS Glue Data Quality / DQDL, EventBridge scheduling, SNS alerts.
 
 ## Cost Control Notes
 
@@ -162,10 +212,10 @@ To be finalized in Phase 6.
 
 ## Portfolio Value
 
-- Demonstrates end-to-end data lake design from raw data through SQL analytics to QuickSight dashboards.
+- Demonstrates end-to-end data lake design from local development through AWS Glue, S3, Athena, and QuickSight.
 - Shows practical data quality engineering through validation, quarantine handling, and DQ monitoring views.
-- Uses partitioned Parquet on S3 and Athena external tables/views for scalable analytics patterns.
-- Documents current implementation honestly while outlining realistic AWS Glue orchestration and alerting enhancements.
+- Uses the same PySpark ETL script locally and on AWS Glue, with proof in CloudWatch and S3 `-glue` zones.
+- Documents current implementation honestly while outlining Glue Crawlers, native Glue DQ, and alerting as next steps.
 
 ## Limitations and Future Improvements
 
@@ -175,7 +225,7 @@ MVP first; streaming, IaC, and ML are out of scope for initial build.
 
 - [ ] Raw CSV data is stored in S3.
 - [ ] Raw data is cataloged by Glue Crawler.
-- [ ] ETL job runs successfully from raw to curated.
+- [x] ETL job runs successfully from raw to curated (local PySpark and AWS Glue).
 - [ ] Curated fact data is written as partitioned Parquet.
 - [ ] `inventory_daily` includes `event_date` in the schema.
 - [ ] Reruns use partition-scoped overwrite.
