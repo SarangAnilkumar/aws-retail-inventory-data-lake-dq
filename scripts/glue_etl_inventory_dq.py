@@ -1,24 +1,21 @@
 #!/usr/bin/env python3
 """
-Local-first PySpark ETL for inventory + data quality pipeline.
+PySpark ETL for inventory + data quality pipeline (local or AWS Glue).
 
-Phase 3 scope:
-- Read generated CSV inputs
+- Read generated CSV inputs from local paths or s3://
 - Apply PySpark data quality validations
 - Split passed/failed rows
 - Write curated, quarantine, and DQ summary Parquet outputs
 - Keep fact-table writes idempotent via partition-scoped cleanup
-
-Note:
-- This script is local-first and does not use AWS SDKs.
-- In AWS Glue later, CLI args can be mapped from Glue job parameters.
 """
 
 from __future__ import annotations
 
 import argparse
 import logging
+import os
 import shutil
+import sys
 from datetime import datetime
 from pathlib import Path
 from typing import Any
@@ -28,8 +25,53 @@ from pyspark.sql import functions as F
 from pyspark.sql.window import Window
 
 
+def _running_on_glue() -> bool:
+    return "JOB_NAME" in sys.argv or os.environ.get("AWS_EXECUTION_ENV") == "AWS_Glue"
+
+
+def _is_s3_path(path: str | Path) -> bool:
+    return str(path).startswith("s3://")
+
+
+def join_uri(base: str | Path, *parts: str) -> str:
+    """Join path segments without breaking s3:// URIs (pathlib breaks s3://)."""
+    uri = str(base).rstrip("/")
+    for part in parts:
+        uri = f"{uri}/{str(part).lstrip('/')}"
+    return uri
+
+
 def parse_args() -> argparse.Namespace:
-    parser = argparse.ArgumentParser(description="Local PySpark ETL + DQ for retail inventory.")
+    if _running_on_glue():
+        from awsglue.utils import getResolvedOptions
+
+        glue_keys = [
+            "JOB_NAME",
+            "input-base-path",
+            "output-base-path",
+            "quarantine-base-path",
+            "dq-results-path",
+            "ingest-run-id",
+            "use-bad-records",
+        ]
+        for optional_key in ("inventory-file", "bad-inventory-file"):
+            if f"--{optional_key}" in sys.argv:
+                glue_keys.append(optional_key)
+        opts = getResolvedOptions(sys.argv, glue_keys)
+        return argparse.Namespace(
+            input_base_path=opts["input-base-path"],
+            output_base_path=opts["output-base-path"],
+            quarantine_base_path=opts["quarantine-base-path"],
+            dq_results_path=opts["dq-results-path"],
+            ingest_run_id=opts["ingest-run-id"],
+            use_bad_records=opts["use-bad-records"],
+            inventory_file=opts.get("inventory-file", "inventory_daily_clean.csv"),
+            bad_inventory_file=opts.get(
+                "bad-inventory-file", "inventory_daily_with_bad_records.csv"
+            ),
+        )
+
+    parser = argparse.ArgumentParser(description="PySpark ETL + DQ for retail inventory.")
     parser.add_argument("--input-base-path", required=True)
     parser.add_argument("--output-base-path", required=True)
     parser.add_argument("--quarantine-base-path", required=True)
@@ -42,25 +84,25 @@ def parse_args() -> argparse.Namespace:
 
 
 def create_spark_session() -> SparkSession:
-    return (
-        SparkSession.builder.appName("retail-inventory-etl-dq")
-        .master("local[*]")
-        .config("spark.sql.session.timeZone", "UTC")
-        .getOrCreate()
+    builder = SparkSession.builder.appName("retail-inventory-etl-dq").config(
+        "spark.sql.session.timeZone", "UTC"
     )
+    if not _running_on_glue():
+        builder = builder.master("local[*]")
+    return builder.getOrCreate()
 
 
 def read_csv_inputs(spark: SparkSession, args: argparse.Namespace) -> dict[str, DataFrame]:
-    base = Path(args.input_base_path)
+    base = args.input_base_path
     use_bad = str(args.use_bad_records).strip().lower() == "true"
     inventory_name = args.bad_inventory_file if use_bad else args.inventory_file
 
-    inventory = spark.read.option("header", True).csv(str(base / inventory_name))
-    stores = spark.read.option("header", True).csv(str(base / "stores.csv"))
-    products = spark.read.option("header", True).csv(str(base / "products.csv"))
-    suppliers = spark.read.option("header", True).csv(str(base / "suppliers.csv"))
-    purchase_orders = spark.read.option("header", True).csv(str(base / "purchase_orders.csv"))
-    shipments = spark.read.option("header", True).csv(str(base / "shipments.csv"))
+    inventory = spark.read.option("header", True).csv(join_uri(base, inventory_name))
+    stores = spark.read.option("header", True).csv(join_uri(base, "stores.csv"))
+    products = spark.read.option("header", True).csv(join_uri(base, "products.csv"))
+    suppliers = spark.read.option("header", True).csv(join_uri(base, "suppliers.csv"))
+    purchase_orders = spark.read.option("header", True).csv(join_uri(base, "purchase_orders.csv"))
+    shipments = spark.read.option("header", True).csv(join_uri(base, "shipments.csv"))
 
     return {
         "inventory": inventory,
@@ -342,52 +384,84 @@ def build_table_scores(spark: SparkSession, ingest_run_id: str, rule_results_df:
     return scored
 
 
-def delete_affected_partitions(base_path: Path, partition_cols: list[str], df: DataFrame) -> None:
-    if not base_path.exists():
-        return
+def delete_affected_partitions(
+    spark: SparkSession, base_path: str | Path, partition_cols: list[str], df: DataFrame
+) -> None:
     if df.rdd.isEmpty():
         return
 
+    base = str(base_path)
     distinct_parts = df.select(*partition_cols).distinct().collect()
+
+    if _is_s3_path(base):
+        jvm = spark._jvm
+        hadoop_conf = spark._jsc.hadoopConfiguration()
+        fs = jvm.org.apache.hadoop.fs.FileSystem
+        uri = jvm.java.net.URI
+        path_cls = jvm.org.apache.hadoop.fs.Path
+
+        for row in distinct_parts:
+            segments = [f"{col}={row[col]}" for col in partition_cols]
+            part_path = join_uri(base, *segments)
+            fs_obj = fs.get(uri(part_path), hadoop_conf)
+            part_obj = path_cls(part_path)
+            if fs_obj.exists(part_obj):
+                fs_obj.delete(part_obj, True)
+        return
+
+    local_base = Path(base)
+    if not local_base.exists():
+        return
+
     for row in distinct_parts:
-        part_path = base_path
+        part_path = local_base
         for col in partition_cols:
             part_path = part_path / f"{col}={row[col]}"
         if part_path.exists():
             shutil.rmtree(part_path, ignore_errors=True)
 
 
-def write_curated_outputs(output_base: Path, data: dict[str, DataFrame]) -> None:
-    output_base.mkdir(parents=True, exist_ok=True)
+def write_curated_outputs(
+    spark: SparkSession, output_base: str | Path, data: dict[str, DataFrame]
+) -> None:
+    output_base_str = str(output_base)
+    if not _is_s3_path(output_base_str):
+        Path(output_base_str).mkdir(parents=True, exist_ok=True)
 
     # Dimensions: small tables, overwrite fully.
-    data["stores"].write.mode("overwrite").parquet(str(output_base / "stores"))
-    data["products"].write.mode("overwrite").parquet(str(output_base / "products"))
-    data["suppliers"].write.mode("overwrite").parquet(str(output_base / "suppliers"))
+    data["stores"].write.mode("overwrite").parquet(join_uri(output_base_str, "stores"))
+    data["products"].write.mode("overwrite").parquet(join_uri(output_base_str, "products"))
+    data["suppliers"].write.mode("overwrite").parquet(join_uri(output_base_str, "suppliers"))
 
-    inventory_path = output_base / "inventory_daily"
-    po_path = output_base / "purchase_orders"
-    shipments_path = output_base / "shipments"
+    inventory_path = join_uri(output_base_str, "inventory_daily")
+    po_path = join_uri(output_base_str, "purchase_orders")
+    shipments_path = join_uri(output_base_str, "shipments")
 
-    delete_affected_partitions(inventory_path, ["year", "month"], data["inventory_daily"])
-    delete_affected_partitions(po_path, ["order_year", "order_month"], data["purchase_orders"])
+    delete_affected_partitions(spark, inventory_path, ["year", "month"], data["inventory_daily"])
     delete_affected_partitions(
-        shipments_path, ["received_year", "received_month"], data["shipments"]
+        spark, po_path, ["order_year", "order_month"], data["purchase_orders"]
+    )
+    delete_affected_partitions(
+        spark, shipments_path, ["received_year", "received_month"], data["shipments"]
     )
 
     data["inventory_daily"].write.mode("append").partitionBy("year", "month").parquet(
-        str(inventory_path), compression="snappy"
+        inventory_path, compression="snappy"
     )
-    data["purchase_orders"].write.mode("append").partitionBy(
-        "order_year", "order_month"
-    ).parquet(str(po_path), compression="snappy")
+    data["purchase_orders"].write.mode("append").partitionBy("order_year", "order_month").parquet(
+        po_path, compression="snappy"
+    )
     data["shipments"].write.mode("append").partitionBy("received_year", "received_month").parquet(
-        str(shipments_path), compression="snappy"
+        shipments_path, compression="snappy"
     )
 
 
-def write_quarantine_outputs(quarantine_base: Path, failed_data: dict[str, DataFrame], ingest_run_id: str) -> None:
-    quarantine_base.mkdir(parents=True, exist_ok=True)
+def write_quarantine_outputs(
+    quarantine_base: str | Path, failed_data: dict[str, DataFrame], ingest_run_id: str
+) -> None:
+    quarantine_base_str = str(quarantine_base)
+    if not _is_s3_path(quarantine_base_str):
+        Path(quarantine_base_str).mkdir(parents=True, exist_ok=True)
     failed_at = datetime.utcnow().replace(microsecond=0).isoformat() + "Z"
 
     for table_name, df in failed_data.items():
@@ -398,13 +472,17 @@ def write_quarantine_outputs(quarantine_base: Path, failed_data: dict[str, DataF
             .withColumn("table_name", F.lit(table_name))
             .withColumn("failed_at", F.lit(failed_at))
         )
-        out.write.mode("overwrite").parquet(str(quarantine_base / table_name))
+        out.write.mode("overwrite").parquet(join_uri(quarantine_base_str, table_name))
 
 
-def write_dq_results(dq_path: Path, rule_results_df: DataFrame, table_scores_df: DataFrame) -> None:
-    dq_path.mkdir(parents=True, exist_ok=True)
-    rule_results_df.write.mode("overwrite").parquet(str(dq_path / "rule_results"))
-    table_scores_df.write.mode("overwrite").parquet(str(dq_path / "table_scores"))
+def write_dq_results(
+    dq_path: str | Path, rule_results_df: DataFrame, table_scores_df: DataFrame
+) -> None:
+    dq_path_str = str(dq_path)
+    if not _is_s3_path(dq_path_str):
+        Path(dq_path_str).mkdir(parents=True, exist_ok=True)
+    rule_results_df.write.mode("overwrite").parquet(join_uri(dq_path_str, "rule_results"))
+    table_scores_df.write.mode("overwrite").parquet(join_uri(dq_path_str, "table_scores"))
 
 
 def main() -> None:
@@ -452,9 +530,9 @@ def main() -> None:
         rule_results_df = build_rule_results(spark, ingest_run_id, all_stats)
         table_scores_df = build_table_scores(spark, ingest_run_id, rule_results_df)
 
-        write_curated_outputs(Path(args.output_base_path), curated_data)
-        write_quarantine_outputs(Path(args.quarantine_base_path), failed_data, ingest_run_id)
-        write_dq_results(Path(args.dq_results_path), rule_results_df, table_scores_df)
+        write_curated_outputs(spark, args.output_base_path, curated_data)
+        write_quarantine_outputs(args.quarantine_base_path, failed_data, ingest_run_id)
+        write_dq_results(args.dq_results_path, rule_results_df, table_scores_df)
 
         logging.info("ETL complete for ingest_run_id=%s", ingest_run_id)
         logging.info(
